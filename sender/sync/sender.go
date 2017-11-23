@@ -1,4 +1,4 @@
-package sender
+package sync
 
 import (
 	"errors"
@@ -18,7 +18,7 @@ const (
 	MaxMessageSize           = PartSize * 255
 )
 
-type SyncSender struct {
+type Sender struct {
 	client      *messagebird.Client
 	rateLimiter <-chan time.Time
 }
@@ -54,7 +54,7 @@ func split(m message.Message) []message.Message {
 	return messages
 }
 
-func (s *SyncSender) send_part(m message.Message, partNo byte, totalParts byte, ref byte) error {
+func (s *Sender) send_part(m message.Message, partNo byte, totalParts byte, ref byte) error {
 	<-s.rateLimiter
 
 	var msgParams *messagebird.MessageParams
@@ -73,7 +73,7 @@ func (s *SyncSender) send_part(m message.Message, partNo byte, totalParts byte, 
 		msgParams = &messagebird.MessageParams{Type: "binary", TypeDetails: typeDetails, DataCoding: "auto"}
 	}
 
-	recipients := []string{fmt.Sprintf("%d", m.Recipient)}
+	recipients := []string{m.Recipient}
 	mbMsg, err := s.client.NewMessage(m.Originator, recipients, m.Message, msgParams)
 
 	if err != nil {
@@ -88,7 +88,7 @@ func (s *SyncSender) send_part(m message.Message, partNo byte, totalParts byte, 
 	return nil
 }
 
-func (s *SyncSender) Send(msg message.Message) error {
+func (s *Sender) Send(msg message.Message) error {
 	if len(msg.Message) > MaxMessageSize {
 		return errors.New("Message too long")
 	}
@@ -106,9 +106,9 @@ func (s *SyncSender) Send(msg message.Message) error {
 	return nil
 }
 
-func New(apiKey string) *SyncSender {
+func New(apiKey string) *Sender {
 	client := messagebird.New(apiKey)
 	client.DebugLog = log.New(os.Stderr, "client", 0)
 
-	return &SyncSender{client: client, rateLimiter: time.Tick(time.Second)}
+	return &Sender{client: client, rateLimiter: time.Tick(time.Second)}
 }

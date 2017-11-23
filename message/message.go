@@ -7,14 +7,14 @@ import (
 )
 
 type Message struct {
-	Recipient  int64  `json:"recipient"`
+	Recipient  string `json:"recipient"`
 	Originator string `json:"originator"`
 	Message    string `json:"message"`
 }
 
 func (m Message) Validate() error {
 	err := ""
-	if m.Recipient == 0 {
+	if len(m.Recipient) == 0 {
 		//TODO: Come up with a better validation
 		err += "empty recipient"
 	}

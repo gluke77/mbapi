@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gluke77/mbapi/message"
+	asyncsender "github.com/gluke77/mbapi/sender/async"
 	syncsender "github.com/gluke77/mbapi/sender/sync"
 )
 
@@ -37,14 +38,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.Send(msg); err != nil {
-		http.Error(w, fmt.Sprintf("Error sending the message: %s", err), http.StatusInternalServerError)
+		if err == asyncsender.ErrRateLimited {
+			http.Error(w, fmt.Sprintf("Error sending the message: %s. Please try later", err), http.StatusTooManyRequests)
+		} else {
+			http.Error(w, fmt.Sprintf("Error sending the message: %s", err), http.StatusInternalServerError)
+		}
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
 }
 
-func New(apiKey string) *Server {
-	sender := syncsender.New(apiKey)
+func New(apiKey string, queueSize int) *Server {
+	var sender Sender
+
+	if queueSize == 0 {
+		sender = syncsender.New(apiKey)
+	} else {
+		sender = asyncsender.New(apiKey, queueSize)
+	}
+
 	return &Server{Sender: sender}
 }
