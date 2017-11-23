@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"os"
 	"time"
 
@@ -24,9 +23,39 @@ type SyncSender struct {
 	rateLimiter <-chan time.Time
 }
 
-func (s *SyncSender) send_part(originator string, recipients []string, text string, partNo byte, totalParts byte, ref byte) error {
+func split(m message.Message) []message.Message {
+	messages := []message.Message{}
+
+	text := m.Message
+
+	if len(text) <= MaxSinglePartMessageSize {
+		messages := append(messages, m)
+		return messages
+	}
+
+	for len(text) > 0 {
+		end := PartSize
+		if end > len(text) {
+			end = len(text)
+		}
+
+		txt := text[:end]
+		text = text[end:]
+
+		msg := message.Message{
+			Originator: m.Originator,
+			Recipient:  m.Recipient,
+			Message:    txt,
+		}
+
+		messages = append(messages, msg)
+	}
+
+	return messages
+}
+
+func (s *SyncSender) send_part(m message.Message, partNo byte, totalParts byte, ref byte) error {
 	<-s.rateLimiter
-	s.rateLimiter = time.After(time.Second)
 
 	var msgParams *messagebird.MessageParams
 
@@ -44,7 +73,8 @@ func (s *SyncSender) send_part(originator string, recipients []string, text stri
 		msgParams = &messagebird.MessageParams{Type: "binary", TypeDetails: typeDetails, DataCoding: "auto"}
 	}
 
-	mbMsg, err := s.client.NewMessage(originator, recipients, text, msgParams)
+	recipients := []string{fmt.Sprintf("%d", m.Recipient)}
+	mbMsg, err := s.client.NewMessage(m.Originator, recipients, m.Message, msgParams)
 
 	if err != nil {
 		errStr := fmt.Sprintf("Error sending message: %s:", err)
@@ -59,33 +89,16 @@ func (s *SyncSender) send_part(originator string, recipients []string, text stri
 }
 
 func (s *SyncSender) Send(msg message.Message) error {
-	recipients := []string{fmt.Sprintf("%d", msg.Recipient)}
-	ref := byte(time.Now().Second())
-
-	length := len(msg.Message)
-
-	if length <= MaxSinglePartMessageSize {
-		return s.send_part(msg.Originator, recipients, msg.Message, 1, 1, ref)
-	}
-
-	if length > MaxMessageSize {
+	if len(msg.Message) > MaxMessageSize {
 		return errors.New("Message too long")
 	}
 
-	totalParts := byte(math.Ceil(float64(length) / float64(PartSize)))
-	var partNo byte
-	for partNo = 1; partNo <= totalParts; partNo++ {
-		start := int(partNo-1) * PartSize
-		end := start + PartSize
-		log.Printf("start=%d, end=%d", start, end)
+	messages := split(msg)
+	totalParts := byte(len(messages))
+	ref := byte(time.Now().Second())
 
-		if end > length {
-			end = length
-		}
-
-		txt := msg.Message[start:end]
-
-		if err := s.send_part(msg.Originator, recipients, txt, partNo, totalParts, ref); err != nil {
+	for partNo, m := range messages {
+		if err := s.send_part(m, byte(partNo+1), totalParts, ref); err != nil {
 			return err
 		}
 	}
@@ -97,5 +110,5 @@ func New(apiKey string) *SyncSender {
 	client := messagebird.New(apiKey)
 	client.DebugLog = log.New(os.Stderr, "client", 0)
 
-	return &SyncSender{client: client, rateLimiter: time.After(time.Second)}
+	return &SyncSender{client: client, rateLimiter: time.Tick(time.Second)}
 }
